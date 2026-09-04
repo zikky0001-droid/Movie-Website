@@ -1,4 +1,4 @@
-// api/download.js - Uses stream URL (not proxy-download)
+// api/download.js - Force fresh data
 export const config = { runtime: 'edge' };
 
 function resolveField(obj, candidates) {
@@ -80,6 +80,7 @@ function getMediaVariants(mediaData, kind = 'stream') {
 function proxyUrl(url) {
   if (!url) return null;
   if (url.startsWith('/')) return url;
+  // ✅ Force fresh proxy with timestamp
   return `/api/proxy?url=${encodeURIComponent(url)}&_cinemind_proxy_ts=${Date.now()}`;
 }
 
@@ -108,14 +109,23 @@ export default async function handler(request) {
       mediaUrl += `&season=${season}&episode=${episode}`;
     }
     
-    const response = await fetch(mediaUrl);
+    // ✅ ADD CACHE-BUSTING to force fresh data from upstream
+    mediaUrl += `&_fresh=${Date.now()}`;
+    
+    const response = await fetch(mediaUrl, {
+      headers: { 
+        'User-Agent': 'CineMind-API/1.0',
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      }
+    });
+    
     if (!response.ok) {
       throw new Error(`Upstream API error: ${response.status}`);
     }
     
     const data = await response.json();
     
-    // ✅ Get STREAM variants (direct CDN URLs, no double proxy)
+    // ✅ Get STREAM variants (direct CDN URLs)
     let variants = getMediaVariants(data, 'stream');
     
     // If no stream variants, use download variants
@@ -144,7 +154,7 @@ export default async function handler(request) {
       selectedVariant = variants[0];
     }
     
-    // ✅ Get the DIRECT CDN URL (not through zstlab proxy-download)
+    // ✅ Get the DIRECT CDN URL
     const rawUrl = selectedVariant.rawUrl || selectedVariant.url;
     if (!rawUrl) {
       return new Response(JSON.stringify({
@@ -159,7 +169,7 @@ export default async function handler(request) {
     const title = data?.data?.title || 'Video';
     const filename = `${title}${season && episode ? ` S${season}E${episode}` : ''} - ${selectedVariant.quality}.mp4`;
     
-    // ✅ Use proxy with filename - NO double proxy!
+    // ✅ Force fresh proxy URL with filename
     const downloadUrl = proxyUrl(rawUrl) + `&name=${encodeURIComponent(filename)}`;
     
     let sizeFormatted = null;
@@ -185,7 +195,7 @@ export default async function handler(request) {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
-        'Cache-Control': 'public, max-age=60',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Access-Control-Allow-Origin': '*'
       }
     });
@@ -200,6 +210,5 @@ export default async function handler(request) {
     });
   }
 }
-
 
 
