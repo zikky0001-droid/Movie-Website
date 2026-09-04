@@ -1,150 +1,120 @@
-// api/stream.js - Complete Fixed Version
+// api/stream.js - Using frontend logic
 export const config = { runtime: 'edge' };
 
 /**
- * Helper: Safely extract variants from API response
- * Handles both arrays and objects
+ * ✅ EXACT COPY of frontend's resolveField function
  */
-function extractVariants(data) {
-  let variants = [];
-  
-  // Try downloads.data first
-  const downloadsData = data?.data?.downloads?.data;
-  const streamData = data?.data?.stream?.data;
-  
-  // If it's an array, use it directly
-  if (Array.isArray(downloadsData)) {
-    variants = downloadsData;
-  } else if (downloadsData && typeof downloadsData === 'object') {
-    // If it's an object, convert to array
-    variants = Object.values(downloadsData);
-  } else if (Array.isArray(streamData)) {
-    variants = streamData;
-  } else if (streamData && typeof streamData === 'object') {
-    variants = Object.values(streamData);
-  }
-  
-  // If still empty, try the top-level data
-  if (variants.length === 0) {
-    const topLevel = data?.data;
-    if (topLevel && typeof topLevel === 'object') {
-      for (const key of ['streams', 'downloads', 'videos', 'sources', 'files']) {
-        if (topLevel[key]) {
-          if (Array.isArray(topLevel[key])) {
-            variants = topLevel[key];
-          } else if (typeof topLevel[key] === 'object') {
-            variants = Object.values(topLevel[key]);
-          }
-          if (variants.length > 0) break;
-        }
-      }
+function resolveField(obj, candidates) {
+  if (!obj || typeof obj !== 'object') return null;
+  for (const key of candidates) {
+    if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') {
+      return obj[key];
     }
   }
-  
-  return variants;
+  return null;
 }
 
 /**
- * ✅ FIXED: Safely get URL from variant
- * Handles link as a function (ZSTLab returns link() sometimes)
+ * ✅ EXACT COPY of frontend's unwrapMedia
  */
-function getVariantUrl(variant) {
-  if (!variant) return null;
-  
-  // Check if link is a function and call it
-  if (variant.link && typeof variant.link === 'function') {
-    try {
-      const result = variant.link();
-      if (typeof result === 'string' && result.startsWith('http')) {
-        return result;
-      }
-    } catch (e) {
-      console.error('Failed to call link function:', e);
-    }
-  }
-  
-  // Check if link is a string
-  if (typeof variant.link === 'string') return variant.link;
-  
-  // Check if linkData exists (some responses have linkData)
-  if (variant.linkData && typeof variant.linkData === 'string') return variant.linkData;
-  
-  // Fallback to other fields
-  return variant?.url || 
-         variant?.downloadUrl || 
-         variant?.streamUrl || 
-         variant?.href || 
-         variant?.src || 
-         variant?.linkUrl ||
-         null;
+function unwrapMedia(mediaData) {
+  return mediaData?.data || mediaData || {};
 }
 
 /**
- * Helper: Safely get quality from variant
+ * ✅ EXACT COPY of frontend's unwrapMediaCollection
  */
-function getVariantQuality(variant) {
-  return variant?.quality || 
-         variant?.resolution || 
-         variant?.label || 
-         variant?.name || 
-         variant?.title ||
-         'unknown';
+function unwrapMediaCollection(mediaData, kind) {
+  const source = unwrapMedia(mediaData);
+  const envelope = source[kind === 'stream' ? 'stream' : 'downloads'] || 
+                   source[kind === 'stream' ? 'streams' : 'download'] || 
+                   source;
+  return envelope?.data?.data || envelope?.data || envelope;
 }
 
 /**
- * Helper: Safely get size from variant
+ * ✅ EXACT COPY of frontend's normalizeQuality
  */
-function getVariantSize(variant) {
-  return variant?.size || 
-         variant?.fileSize || 
-         variant?.length || 
-         null;
+function normalizeQuality(value, fallback = 'best') {
+  if (value === null || value === undefined || value === '') return fallback;
+  const text = String(value).trim();
+  if (/^\d+$/.test(text)) return `${text}p`;
+  if (/^\d+p$/i.test(text)) return text.toLowerCase();
+  return text;
 }
 
 /**
- * Helper: Safely get format from variant
+ * ✅ EXACT COPY of frontend's getMediaVariants
  */
-function getVariantFormat(variant) {
-  return variant?.format || 
-         variant?.mimeType || 
-         variant?.mime_type || 
-         'MP4';
+function getMediaVariants(mediaData, kind = 'stream') {
+  const data = unwrapMediaCollection(mediaData, kind);
+  const keys = kind === 'stream'
+    ? ['streams', 'stream', 'streamUrl', 'stream_url', 'videoUrl', 'video_url', 'url']
+    : ['downloads', 'download', 'downloadUrl', 'download_url'];
+  const collection = resolveField(data, keys);
+  if (!collection) return [];
+  const entries = Array.isArray(collection) ? collection : [collection];
+  const variants = entries.map((item, index) => {
+    const rawUrl = typeof item === 'string' ? item : resolveField(item, kind === 'stream'
+      ? ['url', 'href', 'src', 'streamUrl', 'stream_url', 'videoUrl', 'video_url']
+      : ['downloadUrl', 'download_url', 'url', 'href', 'src', 'streamUrl']);
+    if (!rawUrl) return null;
+    const resolution = typeof item === 'object' ? resolveField(item, ['resolution', 'resolutions', 'quality', 'definition']) : null;
+    const quality = normalizeQuality(resolution || (typeof item === 'object' ? resolveField(item, ['name', 'label']) : null), `source-${index + 1}`);
+    return {
+      ...(item && typeof item === 'object' ? item : {}),
+      rawUrl: rawUrl,
+      url: rawUrl,
+      quality,
+      resolution: resolution || quality,
+      size: typeof item === 'object' ? resolveField(item, ['size', 'fileSize', 'file_size']) : null,
+      duration: typeof item === 'object' ? resolveField(item, ['duration', 'length']) : null,
+      format: typeof item === 'object' ? resolveField(item, ['format', 'mimeType', 'mime_type']) : null
+    };
+  }).filter(Boolean);
+  
+  // Sort by quality (highest first) - same as frontend
+  return variants.sort((a, b) => {
+    const av = parseInt(String(a.resolution).match(/\d+/)?.[0] || '0', 10);
+    const bv = parseInt(String(b.resolution).match(/\d+/)?.[0] || '0', 10);
+    return bv - av;
+  });
+}
+
+/**
+ * ✅ EXACT COPY of frontend's proxyUrl
+ */
+function proxyUrl(url) {
+  if (!url) return null;
+  if (url.startsWith('/')) return url;
+  return `/api/proxy?url=${encodeURIComponent(url)}&_cinemind_proxy_ts=${Date.now()}`;
 }
 
 export default async function handler(request) {
   const url = new URL(request.url);
   const subjectId = url.searchParams.get('id');
   const detailPath = url.searchParams.get('detailPath');
-  const quality = url.searchParams.get('quality') || '1080p';
+  const quality = url.searchParams.get('quality');
   const season = url.searchParams.get('season');
   const episode = url.searchParams.get('episode');
   
-  // Validate required parameters
   if (!subjectId) {
     return new Response(JSON.stringify({ 
-      success: false,
-      error: 'Missing subjectId parameter',
-      usage: '/api/stream?id=123&detailPath=matrix&quality=1080p'
+      success: false, 
+      error: 'Missing subjectId' 
     }), {
       status: 400,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
     });
   }
 
   if (!detailPath) {
     return new Response(JSON.stringify({ 
-      success: false,
-      error: 'Missing detailPath parameter. Get it from /api/details first.',
-      usage: '/api/stream?id=123&detailPath=matrix&quality=1080p'
+      success: false, 
+      error: 'Missing detailPath' 
     }), {
       status: 400,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
     });
   }
 
@@ -153,17 +123,13 @@ export default async function handler(request) {
     
     // Build upstream URL
     let mediaUrl = `https://zstlab.cyou/api/media?subjectId=${subjectId}&detailPath=${encodeURIComponent(detailPath)}&apikey=${apiKey}`;
-    
     if (season && episode) {
       mediaUrl += `&season=${season}&episode=${episode}`;
     }
     
     // Fetch from upstream
     const response = await fetch(mediaUrl, {
-      headers: { 
-        'User-Agent': 'CineMind-API/1.0',
-        'Accept': 'application/json'
-      }
+      headers: { 'User-Agent': 'CineMind-API/1.0' }
     });
     
     if (!response.ok) {
@@ -172,101 +138,74 @@ export default async function handler(request) {
     
     const data = await response.json();
     
-    // ✅ Extract variants safely
-    let variants = extractVariants(data);
+    // ✅ Get variants using the SAME logic as frontend
+    let variants = getMediaVariants(data, 'stream');
     
-    // If no variants found, return helpful error
+    // If no stream variants, try download variants (same as frontend)
     if (variants.length === 0) {
-      return new Response(JSON.stringify({ 
+      variants = getMediaVariants(data, 'download');
+    }
+    
+    if (variants.length === 0) {
+      return new Response(JSON.stringify({
         success: false,
-        error: 'No video sources found for this content. Try another title or quality.',
+        error: 'No video sources available for this content.',
         availableQualities: []
       }), {
         status: 404,
-        headers: { 
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        }
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
       });
     }
     
-    // Find the requested quality (case-insensitive, handle "p" suffix)
-    const normalizedQuality = quality.toLowerCase().replace(/p$/, '');
-    let variant = variants.find(v => {
-      const vQuality = getVariantQuality(v).toLowerCase().replace(/p$/, '');
-      return vQuality === normalizedQuality;
-    });
+    // Get all available qualities (sorted highest to lowest)
+    const availableQualities = variants.map(v => v.quality);
     
-    // If not found, try to find by index (if quality is a number like "1080")
-    if (!variant) {
-      const numQuality = parseInt(quality);
-      if (!isNaN(numQuality)) {
-        variant = variants.find(v => {
-          const vNum = parseInt(getVariantQuality(v));
-          return vNum === numQuality;
-        });
-      }
+    // Find the requested quality or use the best available
+    let selectedVariant = null;
+    if (quality) {
+      const normalizedQuality = quality.toLowerCase().replace(/p$/, '');
+      selectedVariant = variants.find(v => 
+        v.quality.toLowerCase().replace(/p$/, '') === normalizedQuality
+      );
     }
     
-    // If still not found, use the first one
-    if (!variant) {
-      variant = variants[0];
+    // If not found or no quality specified, use the best (first)
+    if (!selectedVariant) {
+      selectedVariant = variants[0];
     }
     
-    // ✅ Get the URL from the variant (handles link function)
-    let variantUrl = getVariantUrl(variant);
-    
-    // If no URL found, try to find any variant with a URL
-    if (!variantUrl) {
-      for (const v of variants) {
-        const url = getVariantUrl(v);
-        if (url) {
-          variantUrl = url;
-          variant = v;
-          break;
-        }
-      }
-    }
-    
-    if (!variantUrl) {
-      return new Response(JSON.stringify({ 
+    // Get the raw URL
+    const rawUrl = selectedVariant.rawUrl || selectedVariant.url;
+    if (!rawUrl) {
+      return new Response(JSON.stringify({
         success: false,
-        error: 'No valid video URL found in the response. The upstream API may have changed.',
-        availableQualities: variants.map(v => getVariantQuality(v))
+        error: 'No valid URL for this quality.',
+        availableQualities: availableQualities
       }), {
         status: 404,
-        headers: { 
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        }
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
       });
     }
-
+    
     // Build response
     const title = data?.data?.title || 'Video';
-    const selectedQuality = getVariantQuality(variant);
-    const filename = `${title}${season && episode ? ` S${season}E${episode}` : ''} - ${selectedQuality}.mp4`;
-    const proxyUrl = `/api/proxy?url=${encodeURIComponent(variantUrl)}&name=${encodeURIComponent(filename)}`;
-    const size = getVariantSize(variant);
-    const format = getVariantFormat(variant);
+    const filename = `${title}${season && episode ? ` S${season}E${episode}` : ''} - ${selectedVariant.quality}.mp4`;
+    const streamUrl = proxyUrl(rawUrl);
     
     return new Response(JSON.stringify({
       success: true,
       data: {
-        streamUrl: proxyUrl,
-        quality: selectedQuality,
+        streamUrl: streamUrl,
+        quality: selectedVariant.quality,
         filename: filename,
-        size: size,
-        format: format,
-        directUrl: variantUrl,
-        availableQualities: variants.map(v => getVariantQuality(v))
+        size: selectedVariant.size,
+        format: selectedVariant.format || 'MP4',
+        availableQualities: availableQualities
       },
       metadata: {
         subjectId: subjectId,
         detailPath: detailPath,
-        title: title,
-        season: season || null,
-        episode: episode || null
+        title: title
       }
     }), {
       status: 200,
@@ -278,19 +217,13 @@ export default async function handler(request) {
     });
     
   } catch (error) {
-    console.error('Stream error:', error);
     return new Response(JSON.stringify({ 
       success: false, 
-      error: error.message || 'Failed to fetch stream',
-      timestamp: new Date().toISOString()
+      error: error.message 
     }), {
       status: 500,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
     });
   }
 }
-
 
