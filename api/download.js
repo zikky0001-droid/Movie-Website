@@ -1,4 +1,4 @@
-// api/download.js - EXACT same logic as frontend
+// api/download.js - Uses stream URL (not proxy-download)
 export const config = { runtime: 'edge' };
 
 function resolveField(obj, candidates) {
@@ -115,18 +115,18 @@ export default async function handler(request) {
     
     const data = await response.json();
     
-    // ✅ Get download variants - same as frontend
-    let variants = getMediaVariants(data, 'download');
+    // ✅ Get STREAM variants (direct CDN URLs, no double proxy)
+    let variants = getMediaVariants(data, 'stream');
     
-    // If no download variants, use stream variants
+    // If no stream variants, use download variants
     if (variants.length === 0) {
-      variants = getMediaVariants(data, 'stream');
+      variants = getMediaVariants(data, 'download');
     }
     
     if (variants.length === 0) {
       return new Response(JSON.stringify({
         success: false,
-        error: 'No video sources available for this content.',
+        error: 'No video sources available.',
         availableQualities: []
       }), {
         status: 404,
@@ -140,16 +140,16 @@ export default async function handler(request) {
       v.quality.toLowerCase().replace(/p$/, '') === normalizedQuality
     );
     
-    // If not found, use the best available
     if (!selectedVariant) {
       selectedVariant = variants[0];
     }
     
+    // ✅ Get the DIRECT CDN URL (not through zstlab proxy-download)
     const rawUrl = selectedVariant.rawUrl || selectedVariant.url;
     if (!rawUrl) {
       return new Response(JSON.stringify({
         success: false,
-        error: 'No valid URL for this quality.'
+        error: 'No valid URL.'
       }), {
         status: 404,
         headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
@@ -158,9 +158,10 @@ export default async function handler(request) {
     
     const title = data?.data?.title || 'Video';
     const filename = `${title}${season && episode ? ` S${season}E${episode}` : ''} - ${selectedVariant.quality}.mp4`;
+    
+    // ✅ Use proxy with filename - NO double proxy!
     const downloadUrl = proxyUrl(rawUrl) + `&name=${encodeURIComponent(filename)}`;
     
-    // Format size
     let sizeFormatted = null;
     if (selectedVariant.size) {
       const bytes = parseInt(selectedVariant.size);
