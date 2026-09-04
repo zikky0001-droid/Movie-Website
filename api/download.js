@@ -1,9 +1,10 @@
-// api/download.js - Download endpoint with JSON response
+// api/download.js - FIXED
 export const config = { runtime: 'edge' };
 
 export default async function handler(request) {
   const url = new URL(request.url);
   const subjectId = url.searchParams.get('id');
+  const detailPath = url.searchParams.get('detailPath');  // ✅ ADD THIS
   const quality = url.searchParams.get('quality') || '1080p';
   const season = url.searchParams.get('season');
   const episode = url.searchParams.get('episode');
@@ -21,9 +22,25 @@ export default async function handler(request) {
     });
   }
 
+  // ✅ REQUIRED: detailPath is mandatory
+  if (!detailPath) {
+    return new Response(JSON.stringify({ 
+      success: false,
+      error: 'Missing detailPath parameter. Get it from /api/details first.'
+    }), {
+      status: 400,
+      headers: { 
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+  }
+
   try {
     const apiKey = process.env.ZSTLAB_API_KEY || 'zst_A301yYAojr9gqZKmshjA9NmLVua0ghfYu5leVNxf';
-    let mediaUrl = `https://zstlab.cyou/api/media?subjectId=${subjectId}&apikey=${apiKey}`;
+    
+    // ✅ BUILD URL WITH detailPath
+    let mediaUrl = `https://zstlab.cyou/api/media?subjectId=${subjectId}&detailPath=${encodeURIComponent(detailPath)}&apikey=${apiKey}`;
     
     if (season && episode) {
       mediaUrl += `&season=${season}&episode=${episode}`;
@@ -52,7 +69,6 @@ export default async function handler(request) {
     const filename = `${title}${season && episode ? ` S${season}E${episode}` : ''} - ${variant.quality || quality}.mp4`;
     const proxyUrl = `/api/proxy?url=${encodeURIComponent(variant.url)}&name=${encodeURIComponent(filename)}`;
     
-    // ✅ Always return JSON with download URL
     return new Response(JSON.stringify({
       success: true,
       data: {
@@ -65,6 +81,7 @@ export default async function handler(request) {
       },
       metadata: {
         subjectId: subjectId,
+        detailPath: detailPath,
         title: title,
         season: season || null,
         episode: episode || null
@@ -91,4 +108,5 @@ export default async function handler(request) {
     });
   }
 }
+
 

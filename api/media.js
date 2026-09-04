@@ -1,10 +1,11 @@
-// api/media.js - Get all media info (stream + download + subtitles)
+// api/media.js - FIXED
 export const config = { runtime: 'edge' };
-const CACHE_TTL = 300; // 5 minutes
+const CACHE_TTL = 300;
 
 export default async function handler(request) {
   const url = new URL(request.url);
   const subjectId = url.searchParams.get('id');
+  const detailPath = url.searchParams.get('detailPath');  // ✅ ADD THIS
   const season = url.searchParams.get('season');
   const episode = url.searchParams.get('episode');
   
@@ -12,7 +13,21 @@ export default async function handler(request) {
     return new Response(JSON.stringify({ 
       success: false,
       error: 'Missing subjectId parameter',
-      usage: '/api/media?id=123&season=1&episode=1'
+      usage: '/api/media?id=123&detailPath=matrix&season=1&episode=1'
+    }), {
+      status: 400,
+      headers: { 
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+  }
+
+  // ✅ REQUIRED: detailPath is mandatory
+  if (!detailPath) {
+    return new Response(JSON.stringify({ 
+      success: false,
+      error: 'Missing detailPath parameter. Get it from /api/details first.'
     }), {
       status: 400,
       headers: { 
@@ -24,7 +39,9 @@ export default async function handler(request) {
 
   try {
     const apiKey = process.env.ZSTLAB_API_KEY || 'zst_A301yYAojr9gqZKmshjA9NmLVua0ghfYu5leVNxf';
-    let mediaUrl = `https://zstlab.cyou/api/media?subjectId=${subjectId}&apikey=${apiKey}`;
+    
+    // ✅ BUILD URL WITH detailPath
+    let mediaUrl = `https://zstlab.cyou/api/media?subjectId=${subjectId}&detailPath=${encodeURIComponent(detailPath)}&apikey=${apiKey}`;
     
     if (season && episode) {
       mediaUrl += `&season=${season}&episode=${episode}`;
@@ -33,20 +50,17 @@ export default async function handler(request) {
     const response = await fetch(mediaUrl);
     const data = await response.json();
     
-    // Extract all variants
     const downloadVariants = data?.data?.downloads?.data || [];
     const streamVariants = data?.data?.stream?.data || [];
     const subtitles = data?.data?.subtitles?.data || [];
-    
-    // Get title
     const title = data?.data?.title || 'Video';
     
-    // Build clean response
     return new Response(JSON.stringify({
       success: true,
       data: {
         title: title,
         subjectId: subjectId,
+        detailPath: detailPath,
         season: season || null,
         episode: episode || null,
         stream: {
@@ -98,4 +112,5 @@ export default async function handler(request) {
     });
   }
 }
+
 
