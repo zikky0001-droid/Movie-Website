@@ -1,3 +1,4 @@
+// api/proxy.js - Clean, without browser-header check
 const ALLOWED_HOSTS = new Set([
   'bcdnxw.hakunaymatata.com',
   'pbcdnw.aoneroom.com',
@@ -5,7 +6,7 @@ const ALLOWED_HOSTS = new Set([
   'api.zstlab.cyou',
   'zstlab.cyou'
 ]);
-const SITE_ORIGIN = 'https://fmoviesunblocked.net/';
+const SITE_ORIGIN = 'https://movie-website-iota-jade.vercel.app/';
 const INITIAL_RANGE = 'bytes=0-65535';
 
 export const config = { runtime: 'edge' };
@@ -27,16 +28,6 @@ function jsonResponse(payload, status) {
   return new Response(JSON.stringify(payload), { status, headers: { ...commonHeaders(), 'Content-Type': 'application/json; charset=utf-8' } });
 }
 
-function looksLikeFirstPartyBrowser(request) {
-  const headers = request.headers;
-  const accept = (headers.get('accept') || '').toLowerCase();
-  return Boolean(
-    headers.get('sec-fetch-site') || headers.get('sec-fetch-mode') || headers.get('sec-fetch-dest') ||
-    headers.get('referer') || headers.get('referrer') || accept.includes('text/html') ||
-    accept.includes('application/json') || accept.includes('video/')
-  );
-}
-
 function safeFilename(name) {
   return String(name || '').replace(/[\r\n"\\]/g, '').slice(0, 180) || 'download';
 }
@@ -52,7 +43,7 @@ async function fetchWithTimeout(url, options, timeoutMs) {
 }
 
 function providerHeaders(request, range) {
-  const origin = (request.headers.get('origin') || 'https://movie-website-alpha-one.vercel.app').replace(/\/$/, '');
+  const origin = (request.headers.get('origin') || SITE_ORIGIN).replace(/\/$/, '');
   const headers = {
     'User-Agent': request.headers.get('user-agent') || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     Accept: request.headers.get('accept') || 'video/mp4,*/*',
@@ -91,7 +82,6 @@ export default async function handler(request) {
   const baseHeaders = commonHeaders();
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: baseHeaders });
   if (!['GET', 'HEAD'].includes(request.method)) return textResponse('Method Not Allowed', 405);
-  if (!looksLikeFirstPartyBrowser(request)) return textResponse('Forbidden', 403);
 
   const requestUrl = new URL(request.url);
   const encodedUrl = requestUrl.searchParams.get('url');
@@ -101,7 +91,11 @@ export default async function handler(request) {
   try {
     const targetUrl = decodeURIComponent(encodedUrl);
     const parsedUrl = new URL(targetUrl);
-    if (parsedUrl.protocol !== 'https:' || !ALLOWED_HOSTS.has(parsedUrl.hostname)) return textResponse('Forbidden', 403);
+    
+    // ✅ Security: Only allow HTTPS and whitelisted hosts
+    if (parsedUrl.protocol !== 'https:' || !ALLOWED_HOSTS.has(parsedUrl.hostname)) {
+      return textResponse('Forbidden', 403);
+    }
 
     const isApiHost = parsedUrl.hostname === 'api.zstlab.cyou' || parsedUrl.hostname === 'zstlab.cyou';
     const isMediaHost = !isApiHost;
@@ -109,16 +103,15 @@ export default async function handler(request) {
     const isVideoMedia = /\.(?:mp4|m4v|webm|mov|m3u8|mpd)$/.test(path);
     const isSubtitleMedia = /\.(?:srt|vtt|ass|ssa|ttml|dfxp)$/.test(path);
     const requestedRange = request.headers.get('range');
-    // Download URLs include `name`; do not apply the player bootstrap range.
-    // Applying bytes=0-65535 here makes the browser save only a 64 KB file.
     const isDownloadRequest = Boolean(name);
     const range = isDownloadRequest
       ? null
       : (requestedRange || (isMediaHost && isVideoMedia && !isSubtitleMedia ? INITIAL_RANGE : null));
+    
     const directHeaders = {
       'User-Agent': 'okhttp/4.12.0',
       Referer: SITE_ORIGIN,
-      Origin: 'https://fmoviesunblocked.net',
+      Origin: SITE_ORIGIN.replace(/\/$/, ''),
       Host: parsedUrl.hostname
     };
     if (range) directHeaders.Range = range;
@@ -142,3 +135,4 @@ export default async function handler(request) {
     return jsonResponse({ error: 'Proxy failed' }, 502);
   }
 }
+
