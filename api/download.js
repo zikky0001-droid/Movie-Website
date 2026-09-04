@@ -1,4 +1,4 @@
-// api/stream.js - Video streaming endpoint with JSON response
+// api/download.js - Download endpoint with JSON response
 export const config = { runtime: 'edge' };
 
 export default async function handler(request) {
@@ -11,14 +11,12 @@ export default async function handler(request) {
   if (!subjectId) {
     return new Response(JSON.stringify({ 
       success: false,
-      error: 'Missing subjectId parameter',
-      usage: '/api/stream?id=123&quality=1080p&season=1&episode=1'
+      error: 'Missing subjectId parameter'
     }), {
       status: 400,
       headers: { 
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'no-cache'
+        'Access-Control-Allow-Origin': '*'
       }
     });
   }
@@ -31,24 +29,16 @@ export default async function handler(request) {
       mediaUrl += `&season=${season}&episode=${episode}`;
     }
     
-    const response = await fetch(mediaUrl, {
-      headers: { 'User-Agent': 'CineMind-API/1.0' }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Upstream API error: ${response.status}`);
-    }
-    
+    const response = await fetch(mediaUrl);
     const data = await response.json();
     
-    // Extract media variants
     const variants = data?.data?.downloads?.data || data?.data?.stream?.data || [];
     const variant = variants.find(v => v.quality === quality) || variants[0];
     
     if (!variant) {
       return new Response(JSON.stringify({ 
         success: false,
-        error: `Quality "${quality}" not found. Available: ${variants.map(v => v.quality).join(', ')}`
+        error: `Quality "${quality}" not available`
       }), {
         status: 404,
         headers: { 
@@ -62,16 +52,16 @@ export default async function handler(request) {
     const filename = `${title}${season && episode ? ` S${season}E${episode}` : ''} - ${variant.quality || quality}.mp4`;
     const proxyUrl = `/api/proxy?url=${encodeURIComponent(variant.url)}&name=${encodeURIComponent(filename)}`;
     
-    // ✅ ALWAYS return JSON for bot integration
+    // ✅ Always return JSON with download URL
     return new Response(JSON.stringify({
       success: true,
       data: {
-        streamUrl: proxyUrl,
+        downloadUrl: proxyUrl,
         quality: variant.quality || quality,
         filename: filename,
         size: variant.size || null,
         format: variant.format || 'MP4',
-        directUrl: variant.url // Original URL (not proxied)
+        directUrl: variant.url
       },
       metadata: {
         subjectId: subjectId,
@@ -83,7 +73,7 @@ export default async function handler(request) {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
-        'Cache-Control': 'public, max-age=300', // 5 minute cache
+        'Cache-Control': 'public, max-age=300',
         'Access-Control-Allow-Origin': '*'
       }
     });
@@ -91,8 +81,7 @@ export default async function handler(request) {
   } catch (error) {
     return new Response(JSON.stringify({ 
       success: false, 
-      error: error.message || 'Failed to fetch stream',
-      timestamp: new Date().toISOString()
+      error: error.message 
     }), {
       status: 500,
       headers: { 
