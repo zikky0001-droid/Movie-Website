@@ -1,6 +1,6 @@
-// api/mediainfo.js - Get all available qualities and subtitles
+// api/mediainfo.js - Complete Fixed Version
 export const config = { runtime: 'edge' };
-const CACHE_TTL = 300;
+const CACHE_TTL = 60; // 1 minute cache for fresh URLs
 
 /**
  * EXACT COPY of frontend's resolveField function
@@ -50,13 +50,30 @@ function getMediaVariants(mediaData, kind = 'stream') {
     if (!rawUrl) return null;
     const resolution = typeof item === 'object' ? resolveField(item, ['resolution', 'resolutions', 'quality', 'definition']) : null;
     const quality = normalizeQuality(resolution || (typeof item === 'object' ? resolveField(item, ['name', 'label']) : null), `source-${index + 1}`);
+    
+    // ✅ Get file size - try multiple fields
+    let size = null;
+    if (typeof item === 'object') {
+      size = resolveField(item, ['size', 'fileSize', 'file_size', 'contentLength', 'content_length']);
+      // If size is a string with units, parse it
+      if (typeof size === 'string') {
+        const match = size.match(/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)$/i);
+        if (match) {
+          const num = parseFloat(match[1]);
+          const unit = match[2].toUpperCase();
+          const multipliers = { B: 1, KB: 1024, MB: 1048576, GB: 1073741824 };
+          size = Math.round(num * (multipliers[unit] || 1));
+        }
+      }
+    }
+    
     return {
       ...(item && typeof item === 'object' ? item : {}),
       rawUrl: rawUrl,
       quality,
       resolution: resolution || quality,
-      size: typeof item === 'object' ? resolveField(item, ['size', 'fileSize', 'file_size']) : null,
-      format: typeof item === 'object' ? resolveField(item, ['format', 'mimeType', 'mime_type']) : null
+      size: size,
+      format: typeof item === 'object' ? resolveField(item, ['format', 'mimeType', 'mime_type']) : 'MP4'
     };
   }).filter(Boolean);
   
@@ -65,6 +82,23 @@ function getMediaVariants(mediaData, kind = 'stream') {
     const bv = parseInt(String(b.resolution).match(/\d+/)?.[0] || '0', 10);
     return bv - av;
   });
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return null;
+  const n = parseInt(bytes, 10);
+  if (isNaN(n) || n <= 0) return null;
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  let size = n;
+  while (size >= 1024 && i < units.length - 1) {
+    size /= 1024;
+    i++;
+  }
+  return {
+    bytes: n,
+    formatted: `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+  };
 }
 
 function proxyUrl(url) {
@@ -135,27 +169,70 @@ export default async function handler(request) {
       };
     }).filter(t => t.url);
     
-    // Build available qualities
-    const allQualities = [...new Set([
-      ...streamVariants.map(v => v.quality),
-      ...downloadVariants.map(v => v.quality)
-    ])];
+    // ✅ Build available qualities with correct sizes
+    const allQualities = [];
+    const qualityMap = {};
     
-    // Build download URLs for each quality
-    const downloadUrls = downloadVariants.map(v => ({
-      quality: v.quality,
-      url: proxyUrl(v.rawUrl || v.url),
-      size: v.size,
-      format: v.format || 'MP4',
-      filename: `${title}${season && episode ? ` S${season}E${episode}` : ''} - ${v.quality}.mp4`
-    }));
+    // Add stream qualities
+    streamVariants.forEach(v => {
+      const q = v.quality;
+      if (!qualityMap[q]) {
+        qualityMap[q] = { stream: v, download: null };
+      } else {
+        qualityMap[q].stream = v;
+      }
+    });
     
-    // Build stream URLs for each quality
-    const streamUrls = streamVariants.map(v => ({
+    // Add download qualities
+    downloadVariants.forEach(v => {
+      const q = v.quality;
+      if (!qualityMap[q]) {
+        qualityMap[q] = { stream: null, download: v };
+      } else {
+        qualityMap[q].download = v;
+      }
+    });
+    
+    const qualities = Object.keys(qualityMap).sort((a, b) => {
+      const aNum = parseInt(a.replace(/p$/, ''));
+      const bNum = parseInt(b.replace(/p$/, ''));
+      return bNum - aNum;
+    });
+    
+    // Build stream URLs
+    const streamUrls = qualities.map(q => {
+      const v = qualityMap[q].stream || qualityMap[q].download;
+      const rawUrl = v?.rawUrl || v?.url;
+      const sizeInfo = formatBytes(v?.size);
+      return {
+        quality: q,
+        url: rawUrl ? proxyUrl(rawUrl) : null,
+        size: sizeInfo,
+        format: v?.format || 'MP4'
+      };
+    }).filter(v => v.url);
+    
+    // Build download URLs (using stream URLs for better reliability)
+    const downloadUrls = qualities.map(q => {
+      const v = qualityMap[q].stream || qualityMap[q].download;
+      const rawUrl = v?.rawUrl || v?.url;
+      const sizeInfo = formatBytes(v?.size);
+      const filename = `${title}${season && episode ? ` S${season}E${episode}` : ''} - ${q}.mp4`;
+      return {
+        quality: q,
+        url: rawUrl ? proxyUrl(rawUrl) : null,
+        size: sizeInfo,
+        filename: filename,
+        format: v?.format || 'MP4'
+      };
+    }).filter(v => v.url);
+    
+    // Build download links (same as download URLs)
+    const downloadLinks = downloadUrls.map(v => ({
       quality: v.quality,
-      url: proxyUrl(v.rawUrl || v.url),
+      url: v.url,
       size: v.size,
-      format: v.format || 'MP4'
+      filename: v.filename
     }));
     
     return new Response(JSON.stringify({
@@ -166,7 +243,7 @@ export default async function handler(request) {
         detailPath: detailPath,
         season: season || null,
         episode: episode || null,
-        availableQualities: allQualities,
+        availableQualities: qualities,
         stream: {
           available: streamUrls.length > 0,
           variants: streamUrls
@@ -179,13 +256,7 @@ export default async function handler(request) {
           available: subtitleTracks.length > 0,
           tracks: subtitleTracks
         },
-        // Direct download URLs for each quality (for WhatsApp bot)
-        downloadLinks: downloadUrls.map(v => ({
-          quality: v.quality,
-          url: v.url,
-          size: v.size,
-          filename: v.filename
-        }))
+        downloadLinks: downloadLinks
       }
     }), {
       status: 200,
@@ -210,4 +281,5 @@ export default async function handler(request) {
     });
   }
 }
+
 

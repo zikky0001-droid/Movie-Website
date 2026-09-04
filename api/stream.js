@@ -1,9 +1,6 @@
-// api/stream.js - Using frontend logic
+// api/stream.js - Fixed with correct sizes
 export const config = { runtime: 'edge' };
 
-/**
- * ✅ EXACT COPY of frontend's resolveField function
- */
 function resolveField(obj, candidates) {
   if (!obj || typeof obj !== 'object') return null;
   for (const key of candidates) {
@@ -14,16 +11,10 @@ function resolveField(obj, candidates) {
   return null;
 }
 
-/**
- * ✅ EXACT COPY of frontend's unwrapMedia
- */
 function unwrapMedia(mediaData) {
   return mediaData?.data || mediaData || {};
 }
 
-/**
- * ✅ EXACT COPY of frontend's unwrapMediaCollection
- */
 function unwrapMediaCollection(mediaData, kind) {
   const source = unwrapMedia(mediaData);
   const envelope = source[kind === 'stream' ? 'stream' : 'downloads'] || 
@@ -32,9 +23,6 @@ function unwrapMediaCollection(mediaData, kind) {
   return envelope?.data?.data || envelope?.data || envelope;
 }
 
-/**
- * ✅ EXACT COPY of frontend's normalizeQuality
- */
 function normalizeQuality(value, fallback = 'best') {
   if (value === null || value === undefined || value === '') return fallback;
   const text = String(value).trim();
@@ -43,9 +31,6 @@ function normalizeQuality(value, fallback = 'best') {
   return text;
 }
 
-/**
- * ✅ EXACT COPY of frontend's getMediaVariants
- */
 function getMediaVariants(mediaData, kind = 'stream') {
   const data = unwrapMediaCollection(mediaData, kind);
   const keys = kind === 'stream'
@@ -61,19 +46,31 @@ function getMediaVariants(mediaData, kind = 'stream') {
     if (!rawUrl) return null;
     const resolution = typeof item === 'object' ? resolveField(item, ['resolution', 'resolutions', 'quality', 'definition']) : null;
     const quality = normalizeQuality(resolution || (typeof item === 'object' ? resolveField(item, ['name', 'label']) : null), `source-${index + 1}`);
+    
+    let size = null;
+    if (typeof item === 'object') {
+      size = resolveField(item, ['size', 'fileSize', 'file_size', 'contentLength', 'content_length']);
+      if (typeof size === 'string') {
+        const match = size.match(/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)$/i);
+        if (match) {
+          const num = parseFloat(match[1]);
+          const unit = match[2].toUpperCase();
+          const multipliers = { B: 1, KB: 1024, MB: 1048576, GB: 1073741824 };
+          size = Math.round(num * (multipliers[unit] || 1));
+        }
+      }
+    }
+    
     return {
       ...(item && typeof item === 'object' ? item : {}),
       rawUrl: rawUrl,
-      url: rawUrl,
       quality,
       resolution: resolution || quality,
-      size: typeof item === 'object' ? resolveField(item, ['size', 'fileSize', 'file_size']) : null,
-      duration: typeof item === 'object' ? resolveField(item, ['duration', 'length']) : null,
-      format: typeof item === 'object' ? resolveField(item, ['format', 'mimeType', 'mime_type']) : null
+      size: size,
+      format: typeof item === 'object' ? resolveField(item, ['format', 'mimeType', 'mime_type']) : 'MP4'
     };
   }).filter(Boolean);
   
-  // Sort by quality (highest first) - same as frontend
   return variants.sort((a, b) => {
     const av = parseInt(String(a.resolution).match(/\d+/)?.[0] || '0', 10);
     const bv = parseInt(String(b.resolution).match(/\d+/)?.[0] || '0', 10);
@@ -81,9 +78,6 @@ function getMediaVariants(mediaData, kind = 'stream') {
   });
 }
 
-/**
- * ✅ EXACT COPY of frontend's proxyUrl
- */
 function proxyUrl(url) {
   if (!url) return null;
   if (url.startsWith('/')) return url;
@@ -98,20 +92,10 @@ export default async function handler(request) {
   const season = url.searchParams.get('season');
   const episode = url.searchParams.get('episode');
   
-  if (!subjectId) {
+  if (!subjectId || !detailPath) {
     return new Response(JSON.stringify({ 
       success: false, 
-      error: 'Missing subjectId' 
-    }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-    });
-  }
-
-  if (!detailPath) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: 'Missing detailPath' 
+      error: 'Missing subjectId or detailPath' 
     }), {
       status: 400,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
@@ -121,13 +105,11 @@ export default async function handler(request) {
   try {
     const apiKey = process.env.ZSTLAB_API_KEY || 'zst_A301yYAojr9gqZKmshjA9NmLVua0ghfYu5leVNxf';
     
-    // Build upstream URL
     let mediaUrl = `https://zstlab.cyou/api/media?subjectId=${subjectId}&detailPath=${encodeURIComponent(detailPath)}&apikey=${apiKey}`;
     if (season && episode) {
       mediaUrl += `&season=${season}&episode=${episode}`;
     }
     
-    // Fetch from upstream
     const response = await fetch(mediaUrl, {
       headers: { 'User-Agent': 'CineMind-API/1.0' }
     });
@@ -138,10 +120,7 @@ export default async function handler(request) {
     
     const data = await response.json();
     
-    // ✅ Get variants using the SAME logic as frontend
     let variants = getMediaVariants(data, 'stream');
-    
-    // If no stream variants, try download variants (same as frontend)
     if (variants.length === 0) {
       variants = getMediaVariants(data, 'download');
     }
@@ -157,10 +136,8 @@ export default async function handler(request) {
       });
     }
     
-    // Get all available qualities (sorted highest to lowest)
     const availableQualities = variants.map(v => v.quality);
     
-    // Find the requested quality or use the best available
     let selectedVariant = null;
     if (quality) {
       const normalizedQuality = quality.toLowerCase().replace(/p$/, '');
@@ -169,12 +146,10 @@ export default async function handler(request) {
       );
     }
     
-    // If not found or no quality specified, use the best (first)
     if (!selectedVariant) {
       selectedVariant = variants[0];
     }
     
-    // Get the raw URL
     const rawUrl = selectedVariant.rawUrl || selectedVariant.url;
     if (!rawUrl) {
       return new Response(JSON.stringify({
@@ -187,10 +162,18 @@ export default async function handler(request) {
       });
     }
     
-    // Build response
     const title = data?.data?.title || 'Video';
     const filename = `${title}${season && episode ? ` S${season}E${episode}` : ''} - ${selectedVariant.quality}.mp4`;
     const streamUrl = proxyUrl(rawUrl);
+    
+    // Format size for response
+    let sizeFormatted = null;
+    if (selectedVariant.size) {
+      const bytes = parseInt(selectedVariant.size);
+      if (!isNaN(bytes) && bytes > 0) {
+        sizeFormatted = `${(bytes / 1048576).toFixed(1)} MB`;
+      }
+    }
     
     return new Response(JSON.stringify({
       success: true,
@@ -199,6 +182,7 @@ export default async function handler(request) {
         quality: selectedVariant.quality,
         filename: filename,
         size: selectedVariant.size,
+        sizeFormatted: sizeFormatted,
         format: selectedVariant.format || 'MP4',
         availableQualities: availableQualities
       },
@@ -211,7 +195,7 @@ export default async function handler(request) {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
-        'Cache-Control': 'public, max-age=300',
+        'Cache-Control': 'public, max-age=60',
         'Access-Control-Allow-Origin': '*'
       }
     });
