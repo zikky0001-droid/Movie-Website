@@ -1,5 +1,25 @@
 {
   "rewrites": [
+    { "source": "/api/stream", "destination": "/api/stream.js" },
+    { "source": "/api/download", "destination": "/api/download.js" },
+    { "source": "/api/details", "destination": "/api/details.js" },
+    { "source": "/api/search", "destination": "/api/search.js" },
+    { "source": "/api/home", "destination": "/api/home.js" },
+    { "source": "/api/trending", "destination": "/api/trending.js" },
+    { "source": "/api/recommendations", "destination": "/api/recommendations.js" },
+    { "source": "/api/media", "destination": "/api/media.js" },
     { "source": "/api/proxy", "destination": "/api/proxy.js" }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" }
+      ]
+    }
   ]
 }
+
+
