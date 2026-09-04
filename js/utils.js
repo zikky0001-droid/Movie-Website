@@ -8,33 +8,6 @@ function getSiteName() {
   return get('site.name') || get('site.shortName') || 'CineMind';
 }
 
-function mediaUrlInfo(url) {
-  if (!url) return null;
-  try {
-    const rawUrl = unwrapProxyTarget(url);
-    const parsed = new URL(rawUrl, window.location.origin);
-    return {
-      url: parsed.toString(),
-      hostname: parsed.hostname.toLowerCase().replace(/\.$/, ''),
-      pathname: parsed.pathname,
-      extension: (parsed.pathname.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase(),
-      isProviderProxy: /(^|\.)zstlab\.cyou$/i.test(parsed.hostname) && /\/api\/proxy(?:-download)?$/i.test(parsed.pathname)
-    };
-  } catch {
-    return null;
-  }
-}
-
-function cacheBustUrl(url, key = '_cinemind_media_ts') {
-  try {
-    const parsed = new URL(url, window.location.origin);
-    parsed.searchParams.set(key, Date.now().toString());
-    return parsed.toString();
-  } catch {
-    return url;
-  }
-}
-
 function resolveField(obj, candidates) {
   if (!obj || typeof obj !== 'object') return null;
   for (const key of candidates) {
@@ -116,34 +89,25 @@ function unwrapProxyTarget(url) {
   return url;
 }
 
-function proxyUrl(url, options = {}) {
+function proxyUrl(url) {
   if (!url) return null;
-  const rawUrl = unwrapProxyTarget(url);
-  if (!rawUrl || rawUrl.startsWith('/')) return rawUrl;
+  url = unwrapProxyTarget(url);
+  if (url.startsWith('/')) return url;
   const configuredProxy = window.CineMind?.config?.get?.('api.proxyUrl') || '/api/proxy';
   const separator = configuredProxy.includes('?') ? '&' : '?';
-  const timestampKey = options.timestampKey || '_cinemind_proxy_ts';
-  return configuredProxy + separator + 'url=' + encodeURIComponent(rawUrl) + '&' + timestampKey + '=' + Date.now();
-}
-
-function safeMediaPart(value, fallback) {
-  const cleaned = String(value || fallback || '')
-    .replace(/[\\/:*?"<>|\r\n]+/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned || fallback || 'download';
+  return configuredProxy + separator + 'url=' + encodeURIComponent(url) + '&_cinemind_proxy_ts=' + Date.now();
 }
 
 function withDownloadFilename(url, title, season, episode, quality) {
   if (!url) return null;
   try {
-    const info = mediaUrlInfo(url);
-    const target = new URL(info?.url || unwrapProxyTarget(url), window.location.origin);
-    const selectedQuality = safeMediaPart(quality || target.searchParams.get('quality'), 'best');
-    const safeTitle = safeMediaPart(title, `${getSiteName()} Movie`);
-    const suffix = season !== undefined && episode !== undefined && season !== '' && episode !== '' ? ` - S${season}E${episode}` : '';
+    const rawUrl = unwrapProxyTarget(url);
+    const target = new URL(rawUrl, window.location.origin);
+    const selectedQuality = quality || target.searchParams.get('quality') || 'best';
+    const safeTitle = String(title || `${getSiteName()} Movie`).replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim();
+    const suffix = season && episode ? ` - S${season}E${episode}` : '';
     const filename = `${safeTitle}${suffix} - ${selectedQuality}.mp4`;
-    const proxied = new URL(proxyUrl(target.toString(), { timestampKey: '_cinemind_download_ts' }), window.location.origin);
+    const proxied = new URL(proxyUrl(target.toString()), window.location.origin);
     proxied.searchParams.set('name', filename);
     return proxied.toString();
   } catch {
@@ -151,17 +115,14 @@ function withDownloadFilename(url, title, season, episode, quality) {
   }
 }
 
-function withSubtitleFilename(url, title, season, episode, language, format) {
+function withSubtitleFilename(url, title, season, episode, language) {
   if (!url) return null;
   try {
-    const info = mediaUrlInfo(url);
-    const extension = String(format || info?.extension || 'srt').toLowerCase().replace(/[^a-z0-9]/g, '') || 'srt';
-    const safeExtension = ['srt', 'vtt', 'ass', 'ssa', 'ttml', 'dfxp'].includes(extension) ? extension : 'srt';
-    const safeTitle = safeMediaPart(title, `${getSiteName()} Movie`);
-    const safeLanguage = safeMediaPart(language, 'subtitle');
-    const suffix = season !== undefined && episode !== undefined && season !== '' && episode !== '' ? ` - S${season}E${episode}` : '';
-    const proxied = new URL(proxyUrl(unwrapProxyTarget(url), { timestampKey: '_cinemind_subtitle_ts' }), window.location.origin);
-    proxied.searchParams.set('name', `${safeTitle}${suffix} - ${safeLanguage}.${safeExtension}`);
+    const safeTitle = String(title || `${getSiteName()} Movie`).replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim();
+    const safeLanguage = String(language || 'subtitle').replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim();
+    const suffix = season && episode ? ` - S${season}E${episode}` : '';
+    const proxied = new URL(proxyUrl(unwrapProxyTarget(url)), window.location.origin);
+    proxied.searchParams.set('name', `${safeTitle}${suffix} - ${safeLanguage}.srt`);
     return proxied.toString();
   } catch {
     return url;
@@ -228,14 +189,10 @@ function getMediaVariants(mediaData, kind = 'stream') {
 }
 
 function getStreamSources(url) {
-  const info = mediaUrlInfo(url);
-  const upstreamUrl = info?.url || unwrapProxyTarget(url);
+  const upstreamUrl = unwrapProxyTarget(url);
   if (!upstreamUrl) return [];
-  const localProxyUrl = proxyUrl(upstreamUrl);
-  const providerProxyBase = get('api.providerProxyUrl') || 'https://api.zstlab.cyou/api/proxy';
-  const providerSeparator = providerProxyBase.includes('?') ? '&' : '?';
-  const providerProxy = `${providerProxyBase}${providerSeparator}url=${encodeURIComponent(upstreamUrl)}&_cinemind_provider_ts=${Date.now()}`;
-  return [...new Set([localProxyUrl, providerProxy, upstreamUrl])];
+  const providerProxy = 'https://api.zstlab.cyou/api/proxy?url=' + encodeURIComponent(upstreamUrl) + '&_cinemind_proxy_ts=' + Date.now();
+  return [...new Set([proxyUrl(upstreamUrl), providerProxy, upstreamUrl])];
 }
 
 function getStreamCandidates(mediaData) {
@@ -268,10 +225,7 @@ function getSubtitleTracks(mediaData) {
     const url = resolveField(track, ['url', 'downloadUrl', 'download_url', 'src']);
     const language = resolveField(track, ['lan', 'language', 'lang', 'srclang']) || `track-${index + 1}`;
     const label = resolveField(track, ['lanName', 'languageName', 'label', 'name']) || language;
-    const info = mediaUrlInfo(url);
-    const rawUrl = info?.url || url;
-    const format = resolveField(track, ['format', 'mimeType', 'mime_type']) || info?.extension || 'srt';
-    return { ...track, rawUrl, url: rawUrl ? proxyUrl(rawUrl, { timestampKey: '_cinemind_subtitle_ts' }) : null, language: String(language), label: String(label), format: String(format) };
+    return { ...track, url: url ? proxyUrl(url) : null, language: String(language), label: String(label) };
   }).filter(track => track.url);
 }
 
@@ -391,8 +345,6 @@ window.CineMind.utils = {
   resolveField,
   getTitle,
   getSiteName,
-  mediaUrlInfo,
-  cacheBustUrl,
   getDescription,
   getPoster,
   getBackdrop,
