@@ -28,7 +28,6 @@ function extractVariants(data) {
   if (variants.length === 0) {
     const topLevel = data?.data;
     if (topLevel && typeof topLevel === 'object') {
-      // Look for any property that might contain video URLs
       for (const key of ['streams', 'downloads', 'videos', 'sources', 'files']) {
         if (topLevel[key]) {
           if (Array.isArray(topLevel[key])) {
@@ -46,15 +45,37 @@ function extractVariants(data) {
 }
 
 /**
- * Helper: Safely get URL from variant (handles different field names)
+ * ✅ FIXED: Safely get URL from variant
+ * Handles link as a function (ZSTLab returns link() sometimes)
  */
 function getVariantUrl(variant) {
+  if (!variant) return null;
+  
+  // Check if link is a function and call it
+  if (variant.link && typeof variant.link === 'function') {
+    try {
+      const result = variant.link();
+      if (typeof result === 'string' && result.startsWith('http')) {
+        return result;
+      }
+    } catch (e) {
+      console.error('Failed to call link function:', e);
+    }
+  }
+  
+  // Check if link is a string
+  if (typeof variant.link === 'string') return variant.link;
+  
+  // Check if linkData exists (some responses have linkData)
+  if (variant.linkData && typeof variant.linkData === 'string') return variant.linkData;
+  
+  // Fallback to other fields
   return variant?.url || 
          variant?.downloadUrl || 
          variant?.streamUrl || 
          variant?.href || 
          variant?.src || 
-         variant?.link || 
+         variant?.linkUrl ||
          null;
 }
 
@@ -66,7 +87,28 @@ function getVariantQuality(variant) {
          variant?.resolution || 
          variant?.label || 
          variant?.name || 
+         variant?.title ||
          'unknown';
+}
+
+/**
+ * Helper: Safely get size from variant
+ */
+function getVariantSize(variant) {
+  return variant?.size || 
+         variant?.fileSize || 
+         variant?.length || 
+         null;
+}
+
+/**
+ * Helper: Safely get format from variant
+ */
+function getVariantFormat(variant) {
+  return variant?.format || 
+         variant?.mimeType || 
+         variant?.mime_type || 
+         'MP4';
 }
 
 export default async function handler(request) {
@@ -150,17 +192,46 @@ export default async function handler(request) {
     
     // Find the requested quality (case-insensitive, handle "p" suffix)
     const normalizedQuality = quality.toLowerCase().replace(/p$/, '');
-    const variant = variants.find(v => {
+    let variant = variants.find(v => {
       const vQuality = getVariantQuality(v).toLowerCase().replace(/p$/, '');
       return vQuality === normalizedQuality;
-    }) || variants[0];
+    });
     
-    // Get the URL from the variant
-    const variantUrl = getVariantUrl(variant);
+    // If not found, try to find by index (if quality is a number like "1080")
+    if (!variant) {
+      const numQuality = parseInt(quality);
+      if (!isNaN(numQuality)) {
+        variant = variants.find(v => {
+          const vNum = parseInt(getVariantQuality(v));
+          return vNum === numQuality;
+        });
+      }
+    }
+    
+    // If still not found, use the first one
+    if (!variant) {
+      variant = variants[0];
+    }
+    
+    // ✅ Get the URL from the variant (handles link function)
+    let variantUrl = getVariantUrl(variant);
+    
+    // If no URL found, try to find any variant with a URL
+    if (!variantUrl) {
+      for (const v of variants) {
+        const url = getVariantUrl(v);
+        if (url) {
+          variantUrl = url;
+          variant = v;
+          break;
+        }
+      }
+    }
+    
     if (!variantUrl) {
       return new Response(JSON.stringify({ 
         success: false,
-        error: 'Selected quality has no valid URL.',
+        error: 'No valid video URL found in the response. The upstream API may have changed.',
         availableQualities: variants.map(v => getVariantQuality(v))
       }), {
         status: 404,
@@ -176,6 +247,8 @@ export default async function handler(request) {
     const selectedQuality = getVariantQuality(variant);
     const filename = `${title}${season && episode ? ` S${season}E${episode}` : ''} - ${selectedQuality}.mp4`;
     const proxyUrl = `/api/proxy?url=${encodeURIComponent(variantUrl)}&name=${encodeURIComponent(filename)}`;
+    const size = getVariantSize(variant);
+    const format = getVariantFormat(variant);
     
     return new Response(JSON.stringify({
       success: true,
@@ -183,8 +256,8 @@ export default async function handler(request) {
         streamUrl: proxyUrl,
         quality: selectedQuality,
         filename: filename,
-        size: variant?.size || null,
-        format: variant?.format || 'MP4',
+        size: size,
+        format: format,
         directUrl: variantUrl,
         availableQualities: variants.map(v => getVariantQuality(v))
       },
@@ -219,4 +292,5 @@ export default async function handler(request) {
     });
   }
 }
+
 

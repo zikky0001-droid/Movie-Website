@@ -6,7 +6,7 @@ const CACHE_TTL = 300;
  * Helper: Safely extract variants from API response
  * Handles both arrays and objects
  */
-function extractVariants(data, type = 'all') {
+function extractVariants(data) {
   let downloadVariants = [];
   let streamVariants = [];
   
@@ -59,15 +59,37 @@ function extractVariants(data, type = 'all') {
 }
 
 /**
- * Helper: Safely get URL from variant
+ * ✅ FIXED: Safely get URL from variant
+ * Handles link as a function (ZSTLab returns link() sometimes)
  */
 function getVariantUrl(variant) {
+  if (!variant) return null;
+  
+  // Check if link is a function and call it
+  if (variant.link && typeof variant.link === 'function') {
+    try {
+      const result = variant.link();
+      if (typeof result === 'string' && result.startsWith('http')) {
+        return result;
+      }
+    } catch (e) {
+      console.error('Failed to call link function:', e);
+    }
+  }
+  
+  // Check if link is a string
+  if (typeof variant.link === 'string') return variant.link;
+  
+  // Check if linkData exists (some responses have linkData)
+  if (variant.linkData && typeof variant.linkData === 'string') return variant.linkData;
+  
+  // Fallback to other fields
   return variant?.url || 
          variant?.downloadUrl || 
          variant?.streamUrl || 
          variant?.href || 
          variant?.src || 
-         variant?.link || 
+         variant?.linkUrl ||
          null;
 }
 
@@ -79,7 +101,28 @@ function getVariantQuality(variant) {
          variant?.resolution || 
          variant?.label || 
          variant?.name || 
+         variant?.title ||
          'unknown';
+}
+
+/**
+ * Helper: Safely get size from variant
+ */
+function getVariantSize(variant) {
+  return variant?.size || 
+         variant?.fileSize || 
+         variant?.length || 
+         null;
+}
+
+/**
+ * Helper: Safely get format from variant
+ */
+function getVariantFormat(variant) {
+  return variant?.format || 
+         variant?.mimeType || 
+         variant?.mime_type || 
+         'MP4';
 }
 
 /**
@@ -93,8 +136,8 @@ function formatVariant(variant, title, season, episode, type = 'stream') {
   return {
     quality: quality,
     url: variantUrl ? `/api/proxy?url=${encodeURIComponent(variantUrl)}&name=${encodeURIComponent(filename)}` : null,
-    size: variant?.size || null,
-    format: variant?.format || 'MP4',
+    size: getVariantSize(variant),
+    format: getVariantFormat(variant),
     rawUrl: variantUrl
   };
 }
@@ -175,18 +218,30 @@ export default async function handler(request) {
     }
     
     // Format responses
-    const formattedStreams = streamVariants.length > 0 ? streamVariants : downloadVariants;
-    const streams = formattedStreams.map(v => formatVariant(v, title, season, episode, 'stream'));
+    const streams = streamVariants.map(v => formatVariant(v, title, season, episode, 'stream'));
     const downloads = downloadVariants.map(v => formatVariant(v, title, season, episode, 'download'));
     
+    // If no stream variants but download variants exist, use downloads as streams
+    const finalStreams = streams.length > 0 ? streams : downloads.map(v => ({
+      ...v,
+      quality: v.quality,
+      url: v.url,
+      size: v.size,
+      format: v.format,
+      rawUrl: v.rawUrl
+    }));
+    
     // Format subtitles
-    const subtitleTracks = subtitles.map(s => ({
-      language: s?.language || s?.lan || s?.srclang || 'unknown',
-      label: s?.label || s?.lanName || s?.name || s?.language || 'Subtitle',
-      url: s?.url || s?.downloadUrl || s?.src ? 
-        `/api/proxy?url=${encodeURIComponent(s?.url || s?.downloadUrl || s?.src)}&name=${encodeURIComponent(`${title}${season && episode ? ` S${season}E${episode}` : ''} - ${s?.language || 'subtitle'}.srt`)}` : 
-        null
-    })).filter(t => t.url);
+    const subtitleTracks = subtitles.map(s => {
+      const subUrl = s?.url || s?.downloadUrl || s?.src || s?.link;
+      return {
+        language: s?.language || s?.lan || s?.srclang || 'unknown',
+        label: s?.label || s?.lanName || s?.name || s?.language || 'Subtitle',
+        url: subUrl ? 
+          `/api/proxy?url=${encodeURIComponent(subUrl)}&name=${encodeURIComponent(`${title}${season && episode ? ` S${season}E${episode}` : ''} - ${s?.language || 'subtitle'}.srt`)}` : 
+          null
+      };
+    }).filter(t => t.url);
     
     return new Response(JSON.stringify({
       success: true,
@@ -197,8 +252,8 @@ export default async function handler(request) {
         season: season || null,
         episode: episode || null,
         stream: {
-          available: streams.length > 0,
-          variants: streams
+          available: finalStreams.length > 0,
+          variants: finalStreams
         },
         download: {
           available: downloads.length > 0,
