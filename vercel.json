@@ -2,7 +2,6 @@
   "rewrites": [
     { "source": "/api/stream", "destination": "/api/stream.js" },
     { "source": "/api/download", "destination": "/api/download.js" },
-    { "source": "/api/download-simple", "destination": "/api/download-simple.js" },
     { "source": "/api/mediainfo", "destination": "/api/mediainfo.js" },
     { "source": "/api/details", "destination": "/api/details.js" },
     { "source": "/api/search", "destination": "/api/search.js" },
@@ -10,8 +9,7 @@
     { "source": "/api/trending", "destination": "/api/trending.js" },
     { "source": "/api/recommendations", "destination": "/api/recommendations.js" },
     { "source": "/api/media", "destination": "/api/media.js" },
-    { "source": "/api/proxy", "destination": "/api/proxy.js" },
-    { "source": "/api/watch", "destination": "/api/watch.js" }
+    { "source": "/api/proxy", "destination": "/api/proxy.js" }
   ],
   "headers": [
     {
