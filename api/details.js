@@ -1,6 +1,6 @@
-// api/details.js - Content details endpoint
+// api/details.js - ADD detailPath
 export const config = { runtime: 'edge' };
-const CACHE_TTL = 3600; // 1 hour
+const CACHE_TTL = 3600;
 
 export default async function handler(request) {
   const url = new URL(request.url);
@@ -47,11 +47,14 @@ export default async function handler(request) {
 
     const subject = data.data.subject;
     
-    // ✅ Clean, structured JSON response for bots
+    // ✅ Extract detailPath from subject
+    const detailPath = subject.detailPath || subject.slug || subject.path || subject.id || subjectId;
+    
     return new Response(JSON.stringify({
       success: true,
       data: {
         id: subjectId,
+        detailPath: detailPath,  // ✅ ADD THIS!
         title: subject.title || subject.name || 'Unknown',
         originalTitle: subject.originalTitle || null,
         description: subject.description || subject.overview || '',
@@ -116,4 +119,5 @@ export default async function handler(request) {
     });
   }
 }
+
 
