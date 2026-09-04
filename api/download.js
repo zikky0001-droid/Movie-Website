@@ -1,4 +1,4 @@
-// api/download.js - Force fresh data
+// api/download.js - NO CACHING, FRESH EVERY TIME
 export const config = { runtime: 'edge' };
 
 function resolveField(obj, candidates) {
@@ -80,7 +80,6 @@ function getMediaVariants(mediaData, kind = 'stream') {
 function proxyUrl(url) {
   if (!url) return null;
   if (url.startsWith('/')) return url;
-  // ✅ Force fresh proxy with timestamp
   return `/api/proxy?url=${encodeURIComponent(url)}&_cinemind_proxy_ts=${Date.now()}`;
 }
 
@@ -98,24 +97,30 @@ export default async function handler(request) {
       error: 'Missing id or detailPath' 
     }), {
       status: 400,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      headers: { 
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Access-Control-Allow-Origin': '*'
+      }
     });
   }
 
   try {
     const apiKey = process.env.ZSTLAB_API_KEY || 'zst_A301yYAojr9gqZKmshjA9NmLVua0ghfYu5leVNxf';
-    let mediaUrl = `https://zstlab.cyou/api/media?subjectId=${subjectId}&detailPath=${encodeURIComponent(detailPath)}&apikey=${apiKey}`;
+    
+    // ✅ FRESH request - NO CACHING
+    let mediaUrl = `https://zstlab.cyou/api/media?subjectId=${subjectId}&detailPath=${encodeURIComponent(detailPath)}&apikey=${apiKey}&_fresh=${Date.now()}`;
     if (season && episode) {
       mediaUrl += `&season=${season}&episode=${episode}`;
     }
     
-    // ✅ ADD CACHE-BUSTING to force fresh data from upstream
-    mediaUrl += `&_fresh=${Date.now()}`;
-    
     const response = await fetch(mediaUrl, {
       headers: { 
         'User-Agent': 'CineMind-API/1.0',
-        'Cache-Control': 'no-cache, no-store, must-revalidate'
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
       }
     });
     
@@ -125,10 +130,9 @@ export default async function handler(request) {
     
     const data = await response.json();
     
-    // ✅ Get STREAM variants (direct CDN URLs)
+    // ✅ Get STREAM variants (direct CDN URLs) - same as frontend
     let variants = getMediaVariants(data, 'stream');
     
-    // If no stream variants, use download variants
     if (variants.length === 0) {
       variants = getMediaVariants(data, 'download');
     }
@@ -140,7 +144,13 @@ export default async function handler(request) {
         availableQualities: []
       }), {
         status: 404,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'Access-Control-Allow-Origin': '*'
+        }
       });
     }
     
@@ -154,7 +164,6 @@ export default async function handler(request) {
       selectedVariant = variants[0];
     }
     
-    // ✅ Get the DIRECT CDN URL
     const rawUrl = selectedVariant.rawUrl || selectedVariant.url;
     if (!rawUrl) {
       return new Response(JSON.stringify({
@@ -162,14 +171,20 @@ export default async function handler(request) {
         error: 'No valid URL.'
       }), {
         status: 404,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'Access-Control-Allow-Origin': '*'
+        }
       });
     }
     
     const title = data?.data?.title || 'Video';
     const filename = `${title}${season && episode ? ` S${season}E${episode}` : ''} - ${selectedVariant.quality}.mp4`;
     
-    // ✅ Force fresh proxy URL with filename
+    // ✅ FRESH proxy URL with timestamp
     const downloadUrl = proxyUrl(rawUrl) + `&name=${encodeURIComponent(filename)}`;
     
     let sizeFormatted = null;
@@ -180,6 +195,7 @@ export default async function handler(request) {
       }
     }
     
+    // ✅ NO CACHE headers on response
     return new Response(JSON.stringify({
       success: true,
       data: {
@@ -195,7 +211,9 @@ export default async function handler(request) {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
         'Access-Control-Allow-Origin': '*'
       }
     });
@@ -206,9 +224,17 @@ export default async function handler(request) {
       error: error.message 
     }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      headers: { 
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Access-Control-Allow-Origin': '*'
+      }
     });
   }
 }
+
+
 
 
