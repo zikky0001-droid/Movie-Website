@@ -1,4 +1,4 @@
-// api/details.js - ADD detailPath
+// api/details.js - Add detailPath
 export const config = { runtime: 'edge' };
 const CACHE_TTL = 3600;
 
@@ -48,7 +48,7 @@ export default async function handler(request) {
     const subject = data.data.subject;
     
     // ✅ Extract detailPath from subject
-    const detailPath = subject.detailPath || subject.slug || subject.path || subject.id || subjectId;
+    const detailPath = subject.detailPath || subject.slug || subject.path || subjectId;
     
     return new Response(JSON.stringify({
       success: true,

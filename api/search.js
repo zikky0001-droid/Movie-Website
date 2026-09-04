@@ -1,6 +1,6 @@
-// api/search.js - Search endpoint
+// api/search.js - Add detailPath to search results
 export const config = { runtime: 'edge' };
-const CACHE_TTL = 300; // 5 minutes
+const CACHE_TTL = 300;
 
 export default async function handler(request) {
   const url = new URL(request.url);
@@ -34,7 +34,6 @@ export default async function handler(request) {
     const totalCount = data?.data?.pager?.totalCount || 0;
     const totalPages = Math.ceil(totalCount / perPage);
     
-    // ✅ Clean search results
     return new Response(JSON.stringify({
       success: true,
       data: {
@@ -46,6 +45,7 @@ export default async function handler(request) {
         totalPages: totalPages,
         items: items.map(item => ({
           id: item.subjectId || item.id,
+          detailPath: item.detailPath || item.slug || item.path || item.id,  // ✅ ADD THIS
           title: item.title || item.name || 'Unknown',
           poster: item.cover || item.poster || null,
           rating: item.rating || 0,
@@ -77,4 +77,5 @@ export default async function handler(request) {
     });
   }
 }
+
 
