@@ -2,8 +2,7 @@
   "rewrites": [
     { "source": "/api/stream", "destination": "/api/stream.js" },
     { "source": "/api/download", "destination": "/api/download.js" },
-    { "source": "/api/watch", "destination": "/api/watch.js" },
-    { "source": "/api/downloader", "destination": "/api/downloader.js" },
+    { "source": "/api/download-simple", "destination": "/api/download-simple.js" },
     { "source": "/api/mediainfo", "destination": "/api/mediainfo.js" },
     { "source": "/api/details", "destination": "/api/details.js" },
     { "source": "/api/search", "destination": "/api/search.js" },
@@ -11,7 +10,8 @@
     { "source": "/api/trending", "destination": "/api/trending.js" },
     { "source": "/api/recommendations", "destination": "/api/recommendations.js" },
     { "source": "/api/media", "destination": "/api/media.js" },
-    { "source": "/api/proxy", "destination": "/api/proxy.js" }
+    { "source": "/api/proxy", "destination": "/api/proxy.js" },
+    { "source": "/api/watch", "destination": "/api/watch.js" }
   ],
   "headers": [
     {
@@ -19,11 +19,9 @@
       "headers": [
         { "key": "Access-Control-Allow-Origin", "value": "*" },
         { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization, Range" },
-        { "key": "Access-Control-Expose-Headers", "value": "Content-Length, Content-Range, Accept-Ranges" }
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" }
       ]
     }
   ]
 }
-
 
