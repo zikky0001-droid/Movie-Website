@@ -1,8 +1,8 @@
-// api/stream.js - Complete with all helper functions
+// api/stream.js - Complete with helper functions
 export const config = { runtime: 'edge' };
 
 // ============================================
-// HELPER FUNCTIONS (same as download.js)
+// HELPER FUNCTIONS (must be defined in this file)
 // ============================================
 
 function resolveField(obj, candidates) {
@@ -107,8 +107,8 @@ export default async function handler(request) {
       status: 400,
       headers: { 
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'no-store, no-cache, must-revalidate'
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Access-Control-Allow-Origin': '*'
       }
     });
   }
@@ -222,6 +222,7 @@ export default async function handler(request) {
     });
     
   } catch (error) {
+    console.error('Stream error:', error);
     return new Response(JSON.stringify({ 
       success: false, 
       error: error.message 
@@ -234,5 +235,5 @@ export default async function handler(request) {
       }
     });
   }
-  }
+}
 
